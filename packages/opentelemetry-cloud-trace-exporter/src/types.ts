@@ -13,6 +13,8 @@
 // limitations under the License.
 
 import { Compute, JWT, OAuth2Client } from 'google-auth-library';
+import { ReadableSpan } from '@opentelemetry/tracing';
+import * as grpc from 'grpc';
 
 export interface Span {
   name?: string;
@@ -137,4 +139,14 @@ export interface SpansWithCredentials {
   name: string;
   resource: { spans: {} };
   auth: JWT | OAuth2Client | Compute;
+}
+
+export interface CollectorExporterError {
+  code?: number;
+  message?: string;
+  stack?: string;
+}
+
+export interface TraceServiceClient extends grpc.Client {
+  batchWriteSpans: (request: any, callback: Function) => {};
 }

@@ -1,3 +1,5 @@
+/* eslint-disable */ 
+
 // Copyright 2020 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -12,15 +14,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import * as protoLoader from '@grpc/proto-loader';
+import * as path from 'path';
+import * as proto from 'google-proto-files';
 import { ExportResult } from '@opentelemetry/base';
 import { NoopLogger } from '@opentelemetry/core';
 import { ReadableSpan, SpanExporter } from '@opentelemetry/tracing';
 import { Logger } from '@opentelemetry/api';
 import { GoogleAuth } from 'google-auth-library';
 import { google } from 'googleapis';
+import * as grpc from 'grpc';
 import { TraceExporterOptions } from './external-types';
 import { getReadableSpanTransformer } from './transform';
 import { Span, SpansWithCredentials } from './types';
+import { TraceServiceClient } from './types';
+import { AssertionError } from 'assert';
+
 
 const OT_REQUEST_HEADER = 'x-opentelemetry-outgoing-request';
 google.options({ headers: { [OT_REQUEST_HEADER]: 1 } });
@@ -30,12 +39,17 @@ google.options({ headers: { [OT_REQUEST_HEADER]: 1 } });
  */
 export class TraceExporter implements SpanExporter {
   private _projectId: string | void | Promise<string | void>;
+  private traceServiceClient?: TraceServiceClient = undefined;
   private readonly _logger: Logger;
   private readonly _auth: GoogleAuth;
+  // private isShutDown: boolean = false;
 
   private static readonly _cloudTrace = google.cloudtrace('v2');
 
   constructor(options: TraceExporterOptions = {}) {
+
+    console.error("Tiger He");
+
     this._logger = options.logger || new NoopLogger();
 
     this._auth = new GoogleAuth({
@@ -51,6 +65,28 @@ export class TraceExporter implements SpanExporter {
     this._projectId = this._auth.getProjectId().catch(err => {
       this._logger.error(err);
     });
+
+    const protoBuffDir = proto.getProtoPath('devtools/cloudtrace', 'v2');
+    
+    // const serverAddress = removeProtocol(this.url);
+    protoLoader
+    .load(`${protoBuffDir}/tracing.proto`, {
+      keepCase: false,
+      longs: String,
+      enums: String,
+      defaults: true,
+      oneofs: true,
+      includeDirs: [path.join(__dirname, 'node_modules/google-proto-files/google')]})
+    .then(packageDefinition => {
+      const packageObject: any = grpc.loadPackageDefinition(
+        packageDefinition
+      );
+      this.traceServiceClient = new packageObject.TraceService('cloudtrace.googleapis.com', this._auth);
+    });
+    // this.traceServiceClient = new packageObject.opentelemetry.proto.collector.trace.v1.TraceService(
+    //   serverAddress,
+    //   credentials
+    // );
   }
 
   /**
@@ -88,7 +124,12 @@ export class TraceExporter implements SpanExporter {
     }
   }
 
-  shutdown(): void {}
+  shutdown(): void {
+    // this.isShutDown = true;
+    if (this.traceServiceClient) {
+      this.traceServiceClient.close();
+    }
+  }
 
   /**
    * Sends new spans to new or existing traces in the Google Cloud Trace format to the
@@ -103,6 +144,7 @@ export class TraceExporter implements SpanExporter {
       // data to backend :
       // https://cloud.google.com/trace/docs/reference/v2/rpc/google.devtools.
       // cloudtrace.v2#google.devtools.cloudtrace.v2.TraceService
+
       TraceExporter._cloudTrace.projects.traces.batchWrite(
         spans,
         (err: Error | null) => {
@@ -140,4 +182,38 @@ export class TraceExporter implements SpanExporter {
       return null;
     }
   }
+
+  // from ot-js
+  // sendSpans(
+  //   spans: ReadableSpan[],
+  //   onSuccess: () => void,
+  //   onError: (error: CollectorExporterError) => void
+  // ): void {
+  //   if (this.isShutDown) {
+  //     return;
+  //   }
+  //   if (this.traceServiceClient) {
+  //     const exportTraceServiceRequest = toCollectorExportTraceServiceRequest(
+  //       spans,
+  //       this
+  //     );
+
+  //     this.traceServiceClient.batchWriteSpans(
+  //       exportTraceServiceRequest,
+  //       (
+  //         err: collectorTypes.opentelemetryProto.collector.trace.v1.ExportTraceServiceError
+  //       ) => {
+  //         if (err) {
+  //           this._logger.error(
+  //             'exportTraceServiceRequest',
+  //             exportTraceServiceRequest
+  //           );
+  //           onError(err);
+  //         } else {
+  //           onSuccess();
+  //         }
+  //       }
+  //     );
+  //   }
+  // }
 }
